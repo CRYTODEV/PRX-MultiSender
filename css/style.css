@@ -728,3 +728,8 @@ td {
 .transaction_link a:hover {
     text-decoration: underline;
 }
+
+.list-detail {
+    max-height: 20rem;
+    overflow: auto;
+}

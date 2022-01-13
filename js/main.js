@@ -17,6 +17,9 @@ var txID = "";
 const minSwapAmount = 100;
 
 var marketingFee = 0.01;
+var transactionFee = 0;
+
+var total_account;
 
 var bnbPrice = 0;
 var etherPrice = 0;
@@ -113,10 +116,56 @@ async function onDisconnect() {
 // fetch data
 async function fetchAccountData() {
 
-    web3 = new Web3(provider);
 
-    const chainId = await web3.eth.getChainId();
-    const accounts = await web3.eth.getAccounts();
+    if(!isMobile) {
+        web3 = new Web3(window.ethereum);
+        if (window.ethereum) {
+            try {
+                // Request account access if needed
+                accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                chainId = await ethereum.request({ method: 'eth_chainId' });
+
+            } catch (error) {
+                console.log(error);
+            }
+        }
+
+        changeNetwork();
+
+        provider = window.ethereum;
+    } else {
+        web3 = new Web3(provider);
+        chainId = await web3.eth.getChainId();
+        // chainData = evmChains.getChain(chainId);
+        accounts = await web3.eth.getAccounts();
+    }
+
+    if (chainId != 56 && chainId != 97) {
+          onDisconnect();
+          Swal.fire({
+            icon: 'error',
+            title: 'Wrong network',
+            text: 'Change network Binance Smart Chain network'
+          })
+          return false;
+    } else if(chainId == 56 && testMode) {
+          onDisconnect();
+          Swal.fire({
+            icon: 'error',
+            title: 'Wrong network',
+            text: 'Change network to Binance Test Network'
+          })
+          return false;
+    } else if(chainId == 97 && !testMode) {
+          onDisconnect();
+          Swal.fire({
+            icon: 'error',
+            title: 'Wrong network',
+            text: 'Change network to Binance Main Network'
+          })
+          return false;
+    }
+
 
     selectedAccount = accounts[0];
     pubChainId = chainId;
@@ -173,13 +222,41 @@ async function fetchAccountData() {
 
 function init() {
 
+    if (window.ethereum) {
+
+      provider = window.ethereum;
+
+      jQuery("#btn-connect-wallet").html("<i class='fas fa-spinner'></i>");
+
+      // Subscribe to accounts change
+      provider.on("accountsChanged", (accounts) => {
+        fetchAccountData();
+      });
+
+      // Subscribe to chainId change
+      provider.on("chainChanged", (chainId) => {
+        fetchAccountData();
+      });
+
+      // Subscribe to networkId change
+      provider.on("networkChanged", (networkId) => {
+        fetchAccountData();
+      });
+
+      fetchAccountData();
+      
+  }
+
     const providerOptions = {
         walletconnect: {
             package: walletConnectProvider,
             options: {
-                // Mikko's test key - don't copy as your mileage may vary
-                infuraId: "8043bb2cf99347b1bfadfb233c5325c0",
-            }
+              rpc: {
+                56: 'https://bsc-dataseed.binance.org/',
+                97: 'https://speedy-nodes-nyc.moralis.io/28eb04c22a0f92b22765e175/bsc/testnet/archive',
+              },
+              network: "binance", // --> this will be use to determine chain id 56
+            },
         },
 
         fortmatic: {
@@ -196,6 +273,15 @@ function init() {
         providerOptions // required
     });
 
+}
+
+
+async function changeNetwork() {
+  var chainId = testMode ? 97 : 56;
+  var result = await ethereum.request({
+     method: 'wallet_switchEthereumChain',
+     params: [{ chainId: "0x" + parseInt(chainId).toString(16) }],
+  });
 }
 
 
@@ -241,9 +327,23 @@ async function getTokenBalance() {
 async function approve() {
 
     var tokenContract = new web3.eth.Contract(erc20Abi, token_address);
+
+    var approve;
+
+    var data = tokenContract.methods.approve(multiSenderAddress, maxUint256).encodeABI();
+    var gasPrice = await web3_other.eth.getGasPrice();
+    const tx = {
+        from: selectedAccount,
+        to: token_address,
+        gasPrice: gasPrice,
+        data: data,
+    };
+
     try {
-        await tokenContract.methods.approve(multiSenderAddress, maxUint256).send({ from: selectedAccount });
-        return true;
+        console.log(tx);
+        approve = await web3.eth.sendTransaction(tx);
+        // await tokenContract.methods.approve(multiSenderAddress, maxUint256).send({ from: selectedAccount });
+        return approve.status;
     } catch (Exception) {
         return false;
     }
@@ -277,9 +377,22 @@ async function multiTransfer() {
 
     value = new BigNumber(web3_other.utils.toWei(cost.toString(), "ether"));
 
+    var result;
+    var data = multiSenderContract.methods.multiTransfer(receivers, totalAmount, token_address, isBNB).encodeABI();
+    var gasPrice = await web3_other.eth.getGasPrice();
+    const tx = {
+        from: selectedAccount,
+        to: multiSenderAddress,
+        gasPrice: gasPrice,
+        data: data,
+        value: value,
+    };
+
     try {
-        var result = await multiSenderContract.methods.multiTransfer(receivers, totalAmount, token_address, isBNB).send({ from: selectedAccount, value: value });
-        txID = result.transactionHash;
+        console.log(tx);
+        result = await web3.eth.sendTransaction(tx);
+        // var result = await multiSenderContract.methods.multiTransfer(receivers, totalAmount, token_address, isBNB).send({ from: selectedAccount, value: value });
+        // txID = result.transactionHash;
         return result.status;
     } catch (exception) {
         return 2;
@@ -783,16 +896,20 @@ async function set_table() {
         console.log(parseFloat(element.amount));
     })
 
+    total_account = row_id - 1;
+
     $("#total_num").text(row_id - 1);
     $("#total_amount").text(totalAmount.toFixed(3) + " " + token);
     $("#token_balance").text(token_balance + " " + token);
     $("#bnb_balance").text(bnb_balance + " BNB");
     if (isBNB) {
-        cost = parseFloat(web3_other.utils.fromWei(marketingFee.toString(), "ether")) + totalAmount;
-        $("#cost").text(cost.toFixed(3) + " BNB")
+        transactionFee = 0.00001;
+        cost = parseFloat(web3_other.utils.fromWei(marketingFee.toString(), "ether")) + totalAmount + transactionFee;
+        $("#cost").text(cost.toFixed(5) + " BNB")
     } else {
+        transactionFee = 0.0002 * (total_account+1.5);
         cost = parseFloat(web3_other.utils.fromWei(marketingFee.toString(), "ether"));
-        $("#cost").text(parseFloat(web3_other.utils.fromWei(marketingFee.toString(), "ether")).toFixed(3) + " BNB");
+        $("#cost").text((cost + transactionFee).toFixed(5) + " BNB");
     }
 
 }
