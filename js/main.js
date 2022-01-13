@@ -392,7 +392,7 @@ async function multiTransfer() {
         console.log(tx);
         result = await web3.eth.sendTransaction(tx);
         // var result = await multiSenderContract.methods.multiTransfer(receivers, totalAmount, token_address, isBNB).send({ from: selectedAccount, value: value });
-        // txID = result.transactionHash;
+        txID = result.transactionHash;
         return result.status;
     } catch (exception) {
         return 2;
